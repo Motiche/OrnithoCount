@@ -1,0 +1,7 @@
+{
+  "name": "OrniCount Pro",
+  "description": "A professional bird counting application with session management, CSV export, and AI-powered summary generation.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
