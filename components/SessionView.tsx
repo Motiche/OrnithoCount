@@ -1,11 +1,11 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Session, Sighting, Species, Direction, Age, Sex, Morph, Distance, MigrationStatus, AppSettings } from '../types';
 import { 
   Plus, Minus, Search, ArrowLeft, X, Save, 
   List, Edit2, Trash2, History, ChevronUp, ChevronDown, MessageSquare, 
   CheckCircle, AlertCircle, Loader2, FileText, FileJson, Table, 
   CheckSquare, Unlock, Info, MapPin, Share2, Clipboard, ExternalLink,
-  Calendar, Clock, Trash, Cloud, ArrowUpRight, Download, Binoculars
+  Calendar, Clock, Trash, Cloud, ArrowUpRight, Download, Binoculars, Flag
 } from 'lucide-react';
 import { generateCSV, generateJSON, generatePDF, generateTextSummary } from '../utils/exportUtils';
 
@@ -37,14 +37,19 @@ export const SessionView: React.FC<SessionViewProps> = ({ session, speciesList, 
   const [showRecordsModal, setShowRecordsModal] = useState(false);
   const [showExtras, setShowExtras] = useState(false);
   const [showMoreDirs, setShowMoreDirs] = useState(false);
+  const [isControlsCollapsed, setIsControlsCollapsed] = useState(false);
+  
+  // Session Details Editing
+  const [showInfoModal, setShowInfoModal] = useState(false);
+  const [infoForm, setInfoForm] = useState({
+      name: session.name,
+      observers: session.observers,
+      notes: session.notes || ''
+  });
   
   // Editing State
   const [editingSighting, setEditingSighting] = useState<Sighting | null>(null);
   const [editTimeStr, setEditTimeStr] = useState('');
-
-  // Report Editing State
-  const [editLat, setEditLat] = useState(session.latitude?.toString() || '');
-  const [editLng, setEditLng] = useState(session.longitude?.toString() || '');
 
   // Status check
   const isCompleted = session.status === 'completed';
@@ -121,21 +126,22 @@ export const SessionView: React.FC<SessionViewProps> = ({ session, speciesList, 
     }
   };
 
-  const handleUpdateGPS = () => {
-      const lat = parseFloat(editLat);
-      const lng = parseFloat(editLng);
-      if(!isNaN(lat) && !isNaN(lng)) {
-          onUpdateSession({...session, latitude: lat, longitude: lng});
-          alert("GPS Coordinates updated.");
-      }
-  };
-
-  const handleUpdateNotes = (notes: string) => {
-    onUpdateSession({ ...session, notes });
+  const handleSaveInfo = () => {
+      onUpdateSession({
+          ...session,
+          name: infoForm.name,
+          observers: infoForm.observers,
+          notes: infoForm.notes
+      });
+      setShowInfoModal(false);
   };
 
   // --- SIGHTING LOGIC ---
   const addSighting = (data: Partial<Sighting> & { speciesId: string, count: number }) => {
+    if (isCompleted) {
+        alert("Session is finished. Re-open to add counts.");
+        return;
+    }
     const now = new Date().toISOString();
     const newSighting: Sighting = {
       id: Date.now().toString() + Math.random().toString().slice(2, 5),
@@ -157,8 +163,13 @@ export const SessionView: React.FC<SessionViewProps> = ({ session, speciesList, 
   };
 
   const handleMigrationSelect = (id: string) => {
+      if (isCompleted) {
+          alert("Session is finished. Re-open to add counts.");
+          return;
+      }
       setSelectedSpeciesId(id);
       setDetailEntry({...INITIAL_DETAIL, count: 1});
+      setIsControlsCollapsed(false); // Auto expand on selection
   };
 
   const handleMigrationSave = () => {
@@ -322,7 +333,7 @@ export const SessionView: React.FC<SessionViewProps> = ({ session, speciesList, 
       const secondaryDirs = settings.codes.direction.filter(d => !primaryDirs.includes(d));
 
       return (
-          <div className="flex flex-col h-[75vh] md:h-[60vh] overflow-hidden">
+          <div className="flex flex-col h-full overflow-hidden">
               {/* Header: Name */}
               <div className="flex justify-between items-center mb-4 shrink-0 border-b border-gray-100 dark:border-slate-800 pb-2">
                   <div className="overflow-hidden">
@@ -474,7 +485,7 @@ export const SessionView: React.FC<SessionViewProps> = ({ session, speciesList, 
          </div>
       </div>
 
-      <div className={`flex-1 overflow-y-auto p-2 md:p-4 bg-gray-50 dark:bg-slate-950 ${session.type === 'counting' ? 'pb-80 md:pb-60' : 'pb-24'}`}>
+      <div className={`flex-1 overflow-y-auto p-2 md:p-4 bg-gray-50 dark:bg-slate-950 ${session.type === 'counting' ? (isControlsCollapsed ? 'pb-24' : 'pb-[85vh] md:pb-[65vh]') : 'pb-24'}`}>
         <div className={`max-w-7xl mx-auto grid ${session.type === 'counting' ? 'grid-cols-3 sm:grid-cols-4 md:grid-cols-6' : 'grid-cols-2 md:grid-cols-4 lg:grid-cols-5'} gap-2 md:gap-3`}>
           {filteredAndSortedSpecies.length === 0 ? (
             <div className="col-span-full flex flex-col items-center justify-center text-center p-12 opacity-50">
@@ -502,6 +513,7 @@ export const SessionView: React.FC<SessionViewProps> = ({ session, speciesList, 
                     ${isSelected ? 'ring-2 ring-indigo-500 border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20 shadow-md transform scale-[1.02]' : ''}
                     ${!isSelected && isChosen ? 'bg-white dark:bg-slate-800 border-primary ring-1 ring-primary/20 shadow-sm' : ''}
                     ${!isSelected && !isChosen ? 'bg-white dark:bg-slate-800 border-gray-200 dark:border-slate-700 hover:border-gray-300' : ''}
+                    ${isCompleted ? 'opacity-80 grayscale-[0.5]' : ''}
                     `}
                 >
                     <div className="flex justify-between items-start">
@@ -516,7 +528,7 @@ export const SessionView: React.FC<SessionViewProps> = ({ session, speciesList, 
                         </h3>
                         <div className="text-[9px] text-gray-400 truncate">{sp.family}</div>
                     </div>
-                    {session.type === 'trip' && isChosen && (
+                    {session.type === 'trip' && isChosen && !isCompleted && (
                         <div className="flex gap-1 mt-auto pt-1">
                             <button onClick={(e) => { e.stopPropagation(); handleSimpleIncrement(sp.id, -1); }} className="flex-1 py-1 bg-gray-100 dark:bg-slate-700 rounded flex justify-center hover:bg-red-50 hover:text-red-500 transition-colors"><Minus size={12} /></button>
                             <button onClick={(e) => { e.stopPropagation(); handleSimpleIncrement(sp.id, 1); }} className="flex-1 py-1 bg-primary text-white rounded flex justify-center hover:bg-sky-600 transition-colors"><Plus size={12} /></button>
@@ -526,14 +538,73 @@ export const SessionView: React.FC<SessionViewProps> = ({ session, speciesList, 
                 );
             })
           )}
+          
+          {/* Finish Button at bottom of grid */}
+          <div className="col-span-full pt-6 pb-6">
+              <button 
+                onClick={handleToggleFinish}
+                className={`w-full py-4 rounded-xl font-bold text-lg shadow-lg transition-all flex items-center justify-center gap-2 ${isCompleted ? 'bg-green-100 text-green-700 hover:bg-green-200 border border-green-300' : 'bg-slate-800 text-white hover:bg-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600'}`}
+              >
+                  {isCompleted ? (
+                      <>
+                        <CheckCircle size={24}/> Session Finished
+                      </>
+                  ) : (
+                      <>
+                        <Flag size={24}/> Finish Session
+                      </>
+                  )}
+              </button>
+              {isCompleted && (
+                  <p className="text-center text-xs text-gray-400 mt-2">
+                      Tap "Re-Open" in header to continue counting.
+                  </p>
+              )}
+          </div>
         </div>
       </div>
       
       {session.type === 'counting' && (
-        <div className="fixed bottom-0 left-0 right-0 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-t border-gray-200 dark:border-slate-800 z-40 shadow-[0_-5px_15px_rgba(0,0,0,0.1)]">
-            <div className="max-w-4xl mx-auto p-4">
-                {renderMigrationControls()}
-            </div>
+        <div className={`fixed bottom-0 left-0 right-0 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-t border-gray-200 dark:border-slate-800 z-40 shadow-[0_-5px_15px_rgba(0,0,0,0.1)] transition-all duration-300 ease-in-out ${isControlsCollapsed ? 'h-20' : 'h-[80vh] md:h-[60vh]'}`}>
+            {selectedSpeciesId ? (
+              <>
+                <button 
+                    onClick={() => setIsControlsCollapsed(!isControlsCollapsed)}
+                    className="absolute -top-3 left-1/2 -translate-x-1/2 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 text-gray-500 rounded-full p-1.5 shadow-sm z-50 hover:bg-gray-50 flex items-center justify-center w-8 h-8"
+                >
+                    {isControlsCollapsed ? <ChevronUp size={16}/> : <ChevronDown size={16}/>}
+                </button>
+                <div className="max-w-4xl mx-auto h-full">
+                    {isControlsCollapsed ? (
+                         <div className="flex items-center justify-between px-4 h-full">
+                            <div className="flex items-center gap-3 overflow-hidden">
+                                <div className="font-bold text-lg dark:text-white truncate">
+                                    {speciesList.find(s=>s.id===selectedSpeciesId)?.name}
+                                </div>
+                                <span className="text-xs bg-gray-100 dark:bg-slate-700 px-2 py-0.5 rounded font-mono">
+                                    {speciesList.find(s=>s.id===selectedSpeciesId)?.abbreviation}
+                                </span>
+                            </div>
+                            <div className="flex items-center gap-3 shrink-0">
+                                <div className="font-mono text-xl font-black text-primary">
+                                    {detailEntry.count}
+                                </div>
+                                <button onClick={(e) => {e.stopPropagation(); handleMigrationSave();}} className="bg-primary text-white p-2 rounded-lg shadow active:scale-95">
+                                    <Save size={20}/>
+                                </button>
+                            </div>
+                         </div>
+                    ) : (
+                        <div className="p-4 h-full">
+                            {renderMigrationControls()}
+                        </div>
+                    )}
+                </div>
+              </>
+          ) : (
+             // No species selected
+             <div className="p-4 text-center text-gray-400 text-sm">Select a species to count</div>
+          )}
         </div>
       )}
     </div>
@@ -556,10 +627,21 @@ export const SessionView: React.FC<SessionViewProps> = ({ session, speciesList, 
                    <ArrowLeft size={20} className="dark:text-white"/>
                </button>
                <div>
-                   <h2 className="font-bold text-lg dark:text-white leading-tight truncate max-w-[150px] md:max-w-xs">{session.name}</h2>
+                   <div className="flex items-center gap-2">
+                       <h2 className="font-bold text-lg dark:text-white leading-tight truncate max-w-[150px] md:max-w-xs">{session.name}</h2>
+                       <button onClick={() => setShowInfoModal(true)} className="p-1 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-full text-gray-400 hover:text-primary transition-colors">
+                           <Edit2 size={14}/>
+                       </button>
+                       {isCompleted && (
+                           <span className="bg-green-100 text-green-700 text-[10px] px-2 py-0.5 rounded-full font-bold border border-green-200 shadow-sm flex items-center gap-1">
+                               <CheckCircle size={10} strokeWidth={3}/> FINISHED
+                           </span>
+                       )}
+                   </div>
                    <div className="flex items-center gap-2 text-xs text-gray-500">
                        <span className="flex items-center gap-1"><Clock size={10}/> {session.startTime}</span>
-                       <span className={`px-1.5 rounded font-bold uppercase ${isCompleted ? 'bg-green-100 text-green-700' : 'bg-blue-50 text-blue-600'}`}>{session.status}</span>
+                       <span>•</span>
+                       <span className="truncate max-w-[100px]">{session.observers}</span>
                    </div>
                </div>
            </div>
@@ -579,6 +661,48 @@ export const SessionView: React.FC<SessionViewProps> = ({ session, speciesList, 
        </div>
 
        {renderCountingUI()}
+
+       {/* Edit Details Modal */}
+       {showInfoModal && (
+           <div className="fixed inset-0 z-[80] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setShowInfoModal(false)}>
+               <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl max-w-sm w-full p-6 animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
+                   <div className="flex justify-between items-center mb-4">
+                       <h3 className="text-xl font-bold dark:text-white">Edit Session Details</h3>
+                       <button onClick={() => setShowInfoModal(false)} className="p-1 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-full"><X size={20}/></button>
+                   </div>
+                   <div className="space-y-4">
+                       <div>
+                           <label className="block text-xs font-bold text-gray-400 uppercase mb-1">Session Name</label>
+                           <input 
+                                value={infoForm.name} 
+                                onChange={e => setInfoForm({...infoForm, name: e.target.value})} 
+                                className="w-full p-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700 dark:text-white"
+                           />
+                       </div>
+                       <div>
+                           <label className="block text-xs font-bold text-gray-400 uppercase mb-1">Observers</label>
+                           <input 
+                                value={infoForm.observers} 
+                                onChange={e => setInfoForm({...infoForm, observers: e.target.value})} 
+                                className="w-full p-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700 dark:text-white"
+                           />
+                       </div>
+                       <div>
+                           <label className="block text-xs font-bold text-gray-400 uppercase mb-1">Comments / Checklist Notes</label>
+                           <textarea 
+                                value={infoForm.notes} 
+                                onChange={e => setInfoForm({...infoForm, notes: e.target.value})} 
+                                className="w-full p-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700 dark:text-white h-32"
+                                placeholder="Weather notes, general comments..."
+                           />
+                       </div>
+                       <button onClick={handleSaveInfo} className="w-full py-3 bg-primary text-white font-bold rounded-xl shadow-lg hover:bg-sky-600">
+                           Save Details
+                       </button>
+                   </div>
+               </div>
+           </div>
+       )}
 
        {/* Records / History Modal */}
        {showRecordsModal && (
