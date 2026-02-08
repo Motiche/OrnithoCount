@@ -246,6 +246,23 @@ const App: React.FC = () => {
     html?.setAttribute('dir', dir);
   }, [settings.theme, settings.language]);
 
+  // --- Auto-fetch Geolocation on New Session View ---
+  useEffect(() => {
+      if (view === 'new-session') {
+          if ('geolocation' in navigator) {
+              navigator.geolocation.getCurrentPosition((position) => {
+                  setNewSessionData(prev => ({
+                      ...prev,
+                      lat: position.coords.latitude.toFixed(6),
+                      lng: position.coords.longitude.toFixed(6)
+                  }));
+              }, (err) => {
+                  console.warn("Geolocation failed or denied", err);
+              }, { timeout: 10000, enableHighAccuracy: true });
+          }
+      }
+  }, [view]);
+
   const toggleTheme = () => setSettings(prev => ({...prev, theme: prev.theme === 'light' ? 'dark' : 'light'}));
   const changeLanguage = (langCode: string) => {
       setSettings(prev => ({...prev, language: langCode}));
@@ -574,6 +591,27 @@ const App: React.FC = () => {
                     <div>
                         <label className="block text-xs font-bold text-gray-400 uppercase mb-2">{t('observers')}</label>
                         <input placeholder="Names of counters..." className="w-full px-4 py-3 rounded-xl border dark:bg-slate-700 dark:border-slate-600 outline-none dark:text-white" value={newSessionData.observers} onChange={e=>setNewSessionData({...newSessionData, observers: e.target.value})} />
+                    </div>
+                    
+                     <div className="bg-gray-50 dark:bg-slate-900/50 p-4 rounded-xl border border-gray-100 dark:border-slate-700">
+                         <div className="flex justify-between items-center mb-3">
+                            <label className="text-xs font-bold text-gray-500 uppercase flex items-center gap-2"><MapPin size={14}/> GPS</label>
+                            {(newSessionData.lat || newSessionData.lng) ? (
+                                <span className="text-[10px] bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-bold">Acquired</span>
+                            ) : (
+                                <span className="text-[10px] bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full font-bold flex items-center gap-1"><Loader2 size={8} className="animate-spin"/> Locating...</span>
+                            )}
+                         </div>
+                        <div className="grid grid-cols-2 gap-3">
+                             <div>
+                                 <label className="text-[10px] text-gray-400 uppercase">Latitude</label>
+                                 <input className="w-full px-3 py-2 rounded-lg border text-sm dark:bg-slate-700 dark:border-slate-600 dark:text-white" placeholder="0.000000" value={newSessionData.lat} onChange={e=>setNewSessionData({...newSessionData, lat: e.target.value})}/>
+                             </div>
+                             <div>
+                                 <label className="text-[10px] text-gray-400 uppercase">Longitude</label>
+                                 <input className="w-full px-3 py-2 rounded-lg border text-sm dark:bg-slate-700 dark:border-slate-600 dark:text-white" placeholder="0.000000" value={newSessionData.lng} onChange={e=>setNewSessionData({...newSessionData, lng: e.target.value})}/>
+                             </div>
+                        </div>
                     </div>
 
                     <div className="bg-gray-50 dark:bg-slate-900/50 p-4 rounded-xl border border-gray-100 dark:border-slate-700">

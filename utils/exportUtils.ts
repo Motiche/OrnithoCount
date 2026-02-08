@@ -29,6 +29,17 @@ export const generateJSON = (session: Session) => {
 export const generateTextSummary = (session: Session, speciesList: Species[]) => {
   let summary = `BIRD TRIP REPORT: ${session.name.toUpperCase()}\n`;
   summary += `Date: ${session.date}\nObservers: ${session.observers}\n`;
+  if (session.latitude) summary += `GPS: ${session.latitude}, ${session.longitude}\n`;
+  if (session.weather) {
+      const w = session.weather;
+      const wStr = [
+          w.temperature ? `${w.temperature}°C` : '',
+          w.cloudCover ? `${w.cloudCover}% Cloud` : '',
+          w.windSpeed ? `Wind: ${w.windSpeed}` : '',
+          w.precipitation ? `Precip: ${w.precipitation}` : ''
+      ].filter(Boolean).join(', ');
+      if (wStr) summary += `Weather: ${wStr}\n`;
+  }
   if (session.notes) summary += `Notes: ${session.notes}\n`;
   summary += `-------------------------------------------\n`;
   
@@ -93,27 +104,35 @@ export const generatePDF = (session: Session, speciesList: Species[]) => {
   doc.setFont("helvetica", "normal");
   doc.text(session.observers, 40, y);
 
-  if (session.latitude) {
+  // Combine GPS and Weather on one line/block for "besides" look
+  if (session.latitude || (session.weather && Object.values(session.weather).some(Boolean))) {
       y += 6;
       doc.setFont("helvetica", "bold");
-      doc.text("GPS:", 14, y);
-      doc.setFont("helvetica", "normal");
-      doc.text(`${session.latitude}, ${session.longitude}`, 40, y);
-  }
-
-  if (session.weather && (session.weather.temperature || session.weather.windSpeed)) {
-      y += 6;
-      doc.setFont("helvetica", "bold");
-      doc.text("Weather:", 14, y);
-      doc.setFont("helvetica", "normal");
-      const w = session.weather;
-      const wStr = [
-          w.temperature ? `${w.temperature}°C` : '',
-          w.cloudCover ? `${w.cloudCover}% Cloud` : '',
-          w.windSpeed ? `Wind: ${w.windSpeed}` : '',
-          w.precipitation ? `Precip: ${w.precipitation}` : ''
-      ].filter(Boolean).join(', ');
-      doc.text(wStr, 40, y);
+      
+      // GPS
+      if (session.latitude) {
+          doc.text("GPS:", 14, y);
+          doc.setFont("helvetica", "normal");
+          doc.text(`${session.latitude}, ${session.longitude}`, 25, y);
+      }
+      
+      // Weather (Placed at x=110 for "besides")
+      if (session.weather) {
+          const w = session.weather;
+          const wStr = [
+              w.temperature ? `${w.temperature}°C` : '',
+              w.cloudCover ? `${w.cloudCover}%` : '',
+              w.windSpeed ? `Wind: ${w.windSpeed}` : ''
+          ].filter(Boolean).join(', ');
+          
+          if (wStr) {
+             const startX = session.latitude ? 110 : 14;
+             doc.setFont("helvetica", "bold");
+             doc.text("Weather:", startX, y);
+             doc.setFont("helvetica", "normal");
+             doc.text(wStr, startX + 18, y);
+          }
+      }
   }
   
   // Notes
