@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { ViewState, Session, Species, SessionType, AppSettings, WeatherInfo, UserConfig } from './types';
 import { SettingsPanel } from './components/SettingsPanel';
@@ -12,6 +13,7 @@ import {
 import { validateWordPressCredentials, syncSessionToWordPress } from './services/wordpressService';
 import { DEFAULT_SPECIES } from './speciesData';
 import { generateCSV, generateJSON, generatePDF, generateTextSummary } from './utils/exportUtils';
+import { getLocalSessions, saveLocalSession, deleteLocalSession, getPendingSessions, addSessionToPendingQueue, removeSessionFromPendingQueue, isOnline } from './services/localStorageService';
 
 const DEFAULT_SETTINGS: AppSettings = {
   speciesList: DEFAULT_SPECIES,
@@ -38,20 +40,12 @@ const DEFAULT_SETTINGS: AppSettings = {
 };
 
 const MOCK_ARTICLES = [
-    { id: 1, title: "Spring Migration 2025 Forecast", date: "2025-02-15", url: "#" },
-    { id: 2, title: "Identification Guide: Juvenile Gulls", date: "2024-11-20", url: "#" },
-    { id: 3, title: "Best Binoculars for Low Light", date: "2024-10-05", url: "#" },
-    { id: 4, title: "Conservation Status of Local Wetlands", date: "2024-09-12", url: "#" },
-    { id: 5, title: "Rare Sightings Report: Feb 2025", date: "2025-02-28", url: "#" },
+    { id: 1, title: "soon...", date: "2025-02-15", url: "#" },
 ];
 
 const LANGUAGES = {
   en: { label: 'English', dir: 'ltr' },
   fa: { label: 'فارسی', dir: 'rtl' },
-  fr: { label: 'Français', dir: 'ltr' },
-  de: { label: 'Deutsch', dir: 'ltr' },
-  ar: { label: 'العربية', dir: 'rtl' },
-  ru: { label: 'Русский', dir: 'ltr' },
 };
 
 const TRANSLATIONS: Record<string, any> = {
@@ -150,6 +144,7 @@ const App: React.FC = () => {
   const [loginForm, setLoginForm] = useState<UserConfig>({ websiteUrl: '', username: '', appPassword: '' });
   const [authStatus, setAuthStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'success' | 'error'>('idle');
+  const [online, setOnline] = useState(isOnline());
   const [exportMenuOpen, setExportMenuOpen] = useState<string | null>(null);
   const [gpsStatus, setGpsStatus] = useState<'idle' | 'locating' | 'acquired' | 'error'>('idle');
   
@@ -205,22 +200,25 @@ const App: React.FC = () => {
   });
 
   useEffect(() => {
-    const savedSessions = localStorage.getItem('orni_sessions');
+    const handleOnline = () => setOnline(true);
+    const handleOffline = () => setOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
     const savedSettings = localStorage.getItem('orni_settings');
     const savedHistory = localStorage.getItem('orni_history');
     const savedUser = localStorage.getItem('orni_user');
     const lastActiveId = localStorage.getItem('orni_last_active_id');
 
-    if (savedSessions) {
-        const parsedSessions = JSON.parse(savedSessions);
-        setSessions(parsedSessions);
-        // Auto-restore logic
-        if (lastActiveId) {
-            const possibleSession = parsedSessions.find((s: Session) => s.id === lastActiveId);
-            if (possibleSession && possibleSession.status === 'active') {
-                setPendingRestoreId(lastActiveId);
-                setShowRestorePrompt(true);
-            }
+    const localSessions = getLocalSessions();
+    setSessions(localSessions);
+
+    if (lastActiveId) {
+        const possibleSession = localSessions.find((s: Session) => s.id === lastActiveId);
+        if (possibleSession && possibleSession.status === 'active') {
+            setPendingRestoreId(lastActiveId);
+            setShowRestorePrompt(true);
         }
     }
     
@@ -241,11 +239,16 @@ const App: React.FC = () => {
 
     if (savedHistory) setLocationHistory(JSON.parse(savedHistory));
     if (savedUser) setUser(JSON.parse(savedUser));
+    
+    return () => {
+        window.removeEventListener('online', handleOnline);
+        window.removeEventListener('offline', handleOffline);
+    };
   }, []);
 
   // Save Sessions & Trigger Toast
-  useEffect(() => { 
-      localStorage.setItem('orni_sessions', JSON.stringify(sessions)); 
+  useEffect(() => {
+    sessions.forEach(session => saveLocalSession(session));
       
       // Debounced Toast for Auto-save
       if (sessions.length > 0) {
@@ -260,6 +263,31 @@ const App: React.FC = () => {
           if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
       };
   }, [sessions]);
+
+  // Sync pending sessions when online
+  useEffect(() => {
+    const syncPending = async () => {
+      if (online && user) {
+        const pending = getPendingSessions();
+        if (pending.length > 0) {
+          setSyncStatus('syncing');
+          for (const session of pending) {
+            try {
+              await syncSessionToWordPress(session, user);
+              removeSessionFromPendingQueue(session.id);
+              setSessions(prev => prev.map(s => s.id === session.id ? { ...s, syncStatus: 'synced' } : s));
+            } catch (error) {
+              console.error('Sync failed for session:', session.id, error);
+              setSessions(prev => prev.map(s => s.id === session.id ? { ...s, syncStatus: 'error' } : s));
+            }
+          }
+          setSyncStatus('success');
+          setTimeout(() => setSyncStatus('idle'), 2000);
+        }
+      }
+    };
+    syncPending();
+  }, [online, user]);
 
   useEffect(() => { localStorage.setItem('orni_settings', JSON.stringify(settings)); }, [settings]);
   useEffect(() => { localStorage.setItem('orni_history', JSON.stringify(locationHistory)); }, [locationHistory]);
@@ -330,15 +358,23 @@ const App: React.FC = () => {
           setShowLogin(true);
           return;
       }
+      if (!online) {
+          addSessionToPendingQueue(sessionToSync);
+          setSessions(prev => prev.map(s => s.id === sessionToSync.id ? { ...s, syncStatus: 'queued' } : s));
+          alert("You are offline. Session will be synced when you are back online.");
+          return;
+      }
       setSyncStatus('syncing');
       try {
           const remoteId = await syncSessionToWordPress(sessionToSync, user);
           setSessions(prev => prev.map(s => s.id === sessionToSync.id ? { ...s, syncStatus: 'synced', remoteId } : s));
+          removeSessionFromPendingQueue(sessionToSync.id);
           setSyncStatus('success');
           setTimeout(() => setSyncStatus('idle'), 2000);
       } catch (error) {
           console.error(error);
           setSessions(prev => prev.map(s => s.id === sessionToSync.id ? { ...s, syncStatus: 'error' } : s));
+          addSessionToPendingQueue(sessionToSync);
           setSyncStatus('error');
           setTimeout(() => setSyncStatus('idle'), 2000);
       }
@@ -454,11 +490,20 @@ const App: React.FC = () => {
       setEditingSession(null);
   };
 
+  const handleDeleteSession = (sessionId: string) => {
+      if (confirm('Delete this session?')) {
+          deleteLocalSession(sessionId);
+          removeSessionFromPendingQueue(sessionId);
+          setSessions(prev => prev.filter(s => s.id !== sessionId));
+      }
+  };
+
   const activeSession = sessions.find(s => s.id === activeSessionId);
 
   const renderSyncStatus = (s: Session) => {
       if (s.syncStatus === 'synced') return <CheckCircle size={14} className="text-green-500" />;
       if (s.syncStatus === 'error') return <AlertCircle size={14} className="text-red-500" />;
+      if (s.syncStatus === 'queued') return <CloudOff size={14} className="text-yellow-500" />;
       return <Cloud size={14} className="text-blue-500" />;
   };
 
@@ -597,7 +642,7 @@ const App: React.FC = () => {
 
                                     {/* Distinct Unsynced Badge */}
                                     {(!session.syncStatus || session.syncStatus !== 'synced') && (
-                                        <span className="flex items-center gap-1 bg-yellow-100 text-yellow-700 text-[10px] px-2 py-0.5 rounded-full font-bold dark:bg-yellow-900/40 dark:text-yellow-300 shadow-sm border border-yellow-200 dark:border-yellow-800">
+                                        <span className={`flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full font-bold shadow-sm border ${session.syncStatus === 'queued' ? 'bg-yellow-100 text-yellow-700 border-yellow-200 dark:bg-yellow-900/40 dark:text-yellow-300 dark:border-yellow-800' : 'bg-gray-100 text-gray-700 border-gray-200 dark:bg-gray-900/40 dark:text-gray-300 dark:border-gray-800'}`}>
                                             <CloudOff size={10} className="stroke-[3]" /> NOT SYNCED
                                         </span>
                                     )}
@@ -668,9 +713,7 @@ const App: React.FC = () => {
                                     <button 
                                         onClick={(e) => { 
                                             e.stopPropagation(); 
-                                            if(confirm('Delete this session?')) {
-                                                setSessions(prev => prev.filter(s => s.id !== session.id));
-                                            }
+                                            handleDeleteSession(session.id);
                                         }} 
                                         className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
                                         title="Delete Session"

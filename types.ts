@@ -61,7 +61,7 @@ export interface Session {
   weather?: WeatherInfo;
   sightings: Sighting[];
   status: 'active' | 'completed';
-  syncStatus?: 'synced' | 'unsynced' | 'error'; // New field
+  syncStatus?: 'synced' | 'unsynced' | 'error' | 'queued'; // New field
   remoteId?: number; // WordPress Post ID
 }
 
